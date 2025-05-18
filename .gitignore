@@ -175,3 +175,10 @@ cython_debug/
 
 data/*
 models/*
+
+data
+backup
+*.out
+*.pt
+pretrain
+ultralytics
