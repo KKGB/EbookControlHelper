@@ -12,12 +12,14 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
 from PyQt5.QtGui import QFont
 from ultralytics import YOLO
 
+from src.control import control_ps
+
 
 # ────────────────────────────── 시선 추적 스레드 ──────────────────────────────
 class EyeTrackerThread(QThread):
     gaze_updated = pyqtSignal(str)
 
-    def __init__(self, model_path="models/best.pt", cam_id=0):
+    def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None):
         super().__init__()
         self.model = YOLO(model_path)
         self.model.fuse()
@@ -34,6 +36,7 @@ class EyeTrackerThread(QThread):
         self.direction_buffer = deque(maxlen=self.required_frames)
         self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Left_Close", 4: "Right_Close", 5: "Close"}
         self.confirmed_gaze = None
+        self.overlay = overlay
 
     def get_center(self, mask):
         ys, xs = np.nonzero(mask)
@@ -48,7 +51,6 @@ class EyeTrackerThread(QThread):
                 continue
 
             frame = cv2.flip(frame, 1)
-            h, w = frame.shape[:2]
 
             res = self.model(frame, imgsz=640, conf=0.25, iou=0.3, device=self.device, verbose=False)[0]
             iris_mask = lid_mask = None
@@ -105,6 +107,7 @@ class EyeTrackerThread(QThread):
                     counts = Counter(self.direction_buffer)
                     most_common, count = counts.most_common(1)[0]
                     if count >= self.min_agreement and most_common != self.confirmed_gaze:
+                        control_ps(most_common, self.overlay.current_process_name)
                         self.confirmed_gaze = most_common
                         self.gaze_updated.emit(self.gaze_directions[most_common])
                         print("👁 Gaze:", self.gaze_directions[most_common])
@@ -162,6 +165,7 @@ class OverlayWindow(QWidget):
         self.border.show()
         
         # 오른쪽 상단 프로세스 표시 라벨
+        self.current_process_name = "N/A"
         self.proc_label = QLabel("Process: N/A", self)
         self.proc_label.setFont(QFont("Arial", 16, QFont.Bold))
         self.proc_label.setStyleSheet("color: lightgreen; background-color: transparent;")
@@ -211,14 +215,14 @@ class OverlayWindow(QWidget):
             hwnd = win32gui.GetForegroundWindow()
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             process_name = psutil.Process(pid).name()
+            self.current_process_name = process_name  # 여기 추가
             self.proc_label.setText(f"Process: {process_name}")
             self.proc_label.adjustSize()
-
-            # 위치 갱신 (오른쪽 상단 고정)
             screen_rect = QDesktopWidget().availableGeometry()
             screen_width = screen_rect.width()
             self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
-        except Exception as e:
+        except Exception:
+            self.current_process_name = "N/A"
             self.proc_label.setText("Process: N/A")
     
     def start_fade_out(self):
@@ -231,7 +235,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     overlay = OverlayWindow()
-    tracker = EyeTrackerThread()
+    tracker = EyeTrackerThread(overlay=overlay)
     tracker.gaze_updated.connect(overlay.update_gaze)
 
     tracker.start()
