@@ -4,10 +4,14 @@ import torch
 import numpy as np
 import platform
 from collections import deque, Counter
+import psutil
+import win32gui
+import win32process
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QDesktopWidget, QGraphicsOpacityEffect
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
 from PyQt5.QtGui import QFont
 from ultralytics import YOLO
+
 
 # ────────────────────────────── 시선 추적 스레드 ──────────────────────────────
 class EyeTrackerThread(QThread):
@@ -156,6 +160,22 @@ class OverlayWindow(QWidget):
             border: 5px solid limegreen;
         """)
         self.border.show()
+        
+        # 오른쪽 상단 프로세스 표시 라벨
+        self.proc_label = QLabel("Process: N/A", self)
+        self.proc_label.setFont(QFont("Arial", 16, QFont.Bold))
+        self.proc_label.setStyleSheet("color: lightgreen; background-color: transparent;")
+        self.proc_label.adjustSize()
+
+        # 위치: 오른쪽 상단 여백 포함
+        screen_width = screen_rect.width()
+        self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
+        self.proc_label.show()
+
+        # 타이머: 1초마다 현재 프로세스 확인
+        self.proc_timer = QTimer(self)
+        self.proc_timer.timeout.connect(self.update_process_name)
+        self.proc_timer.start(1000)
 
     def update_gaze(self, gaze_text):
         self.label.setText(f"Gaze: {gaze_text}")
@@ -185,7 +205,22 @@ class OverlayWindow(QWidget):
 
         # 1초 후 fade-out 시작
         QTimer.singleShot(1000, self.start_fade_out)
-        
+    
+    def update_process_name(self):
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            process_name = psutil.Process(pid).name()
+            self.proc_label.setText(f"Process: {process_name}")
+            self.proc_label.adjustSize()
+
+            # 위치 갱신 (오른쪽 상단 고정)
+            screen_rect = QDesktopWidget().availableGeometry()
+            screen_width = screen_rect.width()
+            self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
+        except Exception as e:
+            self.proc_label.setText("Process: N/A")
+    
     def start_fade_out(self):
         self.fade_anim.setStartValue(1.0)
         self.fade_anim.setEndValue(0.0)
