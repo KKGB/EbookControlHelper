@@ -13,7 +13,7 @@ def _load_gaze_actions(config_path="keymap/config.yaml"):
 _gaze_actions = _load_gaze_actions()
 _last_command = None
 
-def control_ps(gaze_state: int, process_name: str):
+def control_pdf(gaze_state: int, process_name: str):
     global _last_command
 
     if process_name.lower() != "msedge.exe":
@@ -33,3 +33,12 @@ def control_ps(gaze_state: int, process_name: str):
     key, repeat = action
     for _ in range(repeat):
         keyboard.send(key)
+
+def control_youtube(gaze_state: int, process_name: str):
+    pass
+
+def control_web(gaze_state: int, process_name: str):
+    pass
+
+def control_ppt(gaze_state: int, process_name: str):
+    pass

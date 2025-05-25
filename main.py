@@ -3,6 +3,7 @@ import cv2
 import torch
 import numpy as np
 import platform
+import yaml
 from collections import deque, Counter
 import psutil
 import win32gui
@@ -12,19 +13,20 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
 from PyQt5.QtGui import QFont
 from ultralytics import YOLO
 
-from src.control import control_ps
+from src import REGISTRY
 
 
 # ────────────────────────────── 시선 추적 스레드 ──────────────────────────────
 class EyeTrackerThread(QThread):
     gaze_updated = pyqtSignal(str)
 
-    def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None):
+    def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None, process_name=None):
         super().__init__()
         self.model = YOLO(model_path)
         self.model.fuse()
         self.cap = cv2.VideoCapture(cam_id)
         self.running = True
+        self.process_name = process_name
 
         if platform.system() == "Darwin":
             self.device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -107,7 +109,7 @@ class EyeTrackerThread(QThread):
                     counts = Counter(self.direction_buffer)
                     most_common, count = counts.most_common(1)[0]
                     if count >= self.min_agreement and most_common != self.confirmed_gaze:
-                        control_ps(most_common, self.overlay.current_process_name)
+                        REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
                         self.confirmed_gaze = most_common
                         self.gaze_updated.emit(self.gaze_directions[most_common])
                         print("👁 Gaze:", self.gaze_directions[most_common])
@@ -233,9 +235,18 @@ class OverlayWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    with open("keymap/config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    process_name = config.get("control")
+
+    if process_name not in REGISTRY:
+        raise ValueError(f"❌ REGISTRY에 '{process_name}'에 해당하는 컨트롤러가 등록되어 있지 않습니다.\n"
+                         f"가능한 키: {list(REGISTRY.keys())}")
 
     overlay = OverlayWindow()
-    tracker = EyeTrackerThread(overlay=overlay)
+    tracker = EyeTrackerThread(overlay=overlay, process_name=process_name)
     tracker.gaze_updated.connect(overlay.update_gaze)
 
     tracker.start()
