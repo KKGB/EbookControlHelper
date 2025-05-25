@@ -230,7 +230,7 @@ class OverlayWindow(QWidget):
         self.fade_anim.setEndValue(0.0)
         self.fade_anim.start()
 
-# ────────────────────────────── 메인 실행 ──────────────────────────────
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
