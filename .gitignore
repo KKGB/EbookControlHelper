@@ -181,3 +181,4 @@ backup
 *.out
 *.pt
 pretrain
+.vscode
