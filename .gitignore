@@ -182,3 +182,4 @@ backup
 *.pt
 pretrain
 .vscode
+.DS_Store
