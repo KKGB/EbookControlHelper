@@ -151,14 +151,15 @@ class EyeTrackerThread(QThread):
 class OverlayWindow(QWidget):
     def __init__(self):
         super().__init__()
-        if platform.system() == "Darwin":
+        if IS_MAC:
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         else:
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        screen_rect = QDesktopWidget().availableGeometry()
+        screen = QApplication.primaryScreen()
+        screen_rect = screen.geometry()
         self.setGeometry(screen_rect)
 
         self.label = QLabel("Gaze: Detecting...", self)
@@ -191,8 +192,10 @@ class OverlayWindow(QWidget):
         self.proc_label.setFont(QFont("Arial", 16, QFont.Bold))
         self.proc_label.setStyleSheet("color: lightgreen; background-color: transparent;")
         self.proc_label.adjustSize()
+
         screen_width = screen_rect.width()
-        self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
+        proc_label_y = 40 if IS_MAC else 20
+        self.proc_label.move(screen_width - self.proc_label.width() - 20, proc_label_y)
         self.proc_label.show()
 
         self.proc_timer = QTimer(self)
@@ -228,9 +231,11 @@ class OverlayWindow(QWidget):
         self.current_process_name = get_foreground_process_name()
         self.proc_label.setText(f"Process: {self.current_process_name}")
         self.proc_label.adjustSize()
-        screen_rect = QDesktopWidget().availableGeometry()
-        screen_width = screen_rect.width()
-        self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
+
+        screen = QApplication.primaryScreen()
+        screen_width = screen.geometry().width()
+        proc_label_y = 40 if IS_MAC else 20
+        self.proc_label.move(screen_width - self.proc_label.width() - 20, proc_label_y)
 
     def start_fade_out(self):
         self.fade_anim.setStartValue(1.0)
