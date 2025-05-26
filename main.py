@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import platform
 import yaml
+import threading
 from collections import deque, Counter
 import psutil
 import win32gui
@@ -234,6 +235,22 @@ class OverlayWindow(QWidget):
         self.fade_anim.setEndValue(0.0)
         self.fade_anim.start()
 
+# ──────────────────────────────  콘솔 입력 스레드 ──────────────────────────────
+class ConsoleInputThread(threading.Thread):
+    def __init__(self, app, tracker):
+        super().__init__(daemon=True)
+        self.app = app
+        self.tracker = tracker
+
+    def run(self):
+        while True:
+            user_input = input("[입력 대기] 종료하려면 'exit' 또는 'q' 입력: ").strip().lower()
+            if user_input in ("exit", "q", "quit"):
+                print("👋 종료 요청됨. 트래커 중지 중...")
+                self.tracker.stop()
+                self.app.quit()
+                break
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -253,6 +270,8 @@ if __name__ == "__main__":
     tracker.gaze_updated.connect(overlay.update_gaze)
 
     tracker.start()
+    console_input_thread = ConsoleInputThread(app, tracker)
+    console_input_thread.start()
     exit_code = app.exec_()
     tracker.stop()
     sys.exit(exit_code)
