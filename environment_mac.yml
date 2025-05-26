@@ -1,0 +1,44 @@
+name: gaze_mac
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - numpy=1.23
+  - opencv
+  - pyyaml
+  - psutil
+  - pyqt
+  - matplotlib
+  - scipy
+  - pandas
+  - scikit-learn
+  - tqdm
+  - pip:
+      - torch==2.2.0
+      - torchvision
+      - torchaudio
+      - ultralytics==8.3.143
+      - keyboard==0.13.5
+      - pyautogui
+      - pygetwindow
+      - pyperclip
+      - pymsgbox
+      - wandb
+      - submitit
+      - stable-baselines3==1.1.0a3
+      - botorch
+      - gpytorch
+      - einops
+      - hydra-core
+      - omegaconf
+      - jupyter
+      - ipykernel
+      - ipywidgets
+      - matplotlib-inline
+      - jupyterlab
+      - jupyterlab-widgets
+      - protobuf
+      - setuptools
+      - wheel
