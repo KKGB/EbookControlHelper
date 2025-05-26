@@ -1,9 +1,10 @@
 import keyboard
 import yaml
 import os
-
+from utils.path import resource_path
 
 def _load_gaze_actions(config_path="keymap/config.yaml"):
+    config_path = resource_path(config_path)
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Gaze config file not found: {config_path}")
 

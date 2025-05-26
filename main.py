@@ -14,6 +14,7 @@ from PyQt5.QtGui import QFont
 from ultralytics import YOLO
 
 from src import REGISTRY
+from utils.path import resource_path
 
 
 # ────────────────────────────── 시선 추적 스레드 ──────────────────────────────
@@ -22,6 +23,7 @@ class EyeTrackerThread(QThread):
 
     def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None, process_name=None):
         super().__init__()
+        model_path = resource_path(model_path)
         self.model = YOLO(model_path)
         self.model.fuse()
         self.cap = cv2.VideoCapture(cam_id)
@@ -236,7 +238,8 @@ class OverlayWindow(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    with open("keymap/config.yaml", "r", encoding="utf-8") as f:
+    config_path = resource_path("keymap/config.yaml")
+    with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     process_name = config.get("control")
