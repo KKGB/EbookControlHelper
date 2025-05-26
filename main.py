@@ -4,11 +4,9 @@ import torch
 import numpy as np
 import platform
 import yaml
-import threading
 from collections import deque, Counter
 import psutil
-import win32gui
-import win32process
+
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QDesktopWidget, QGraphicsOpacityEffect
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
 from PyQt5.QtGui import QFont
@@ -17,8 +15,34 @@ from ultralytics import YOLO
 from src import REGISTRY
 from utils.path import resource_path
 
+IS_MAC = platform.system() == "Darwin"
+IS_WIN = platform.system() == "Windows"
 
-# ────────────────────────────── 시선 추적 스레드 ──────────────────────────────
+if IS_WIN:
+    import win32gui
+    import win32process
+elif IS_MAC:
+    from AppKit import NSWorkspace
+
+
+def get_foreground_process_name():
+    if IS_WIN:
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            return psutil.Process(pid).name()
+        except Exception:
+            return "N/A"
+    elif IS_MAC:
+        try:
+            active_app = NSWorkspace.sharedWorkspace().frontmostApplication()
+            return active_app.localizedName()
+        except Exception:
+            return "N/A"
+    else:
+        return "N/A"
+
+
 class EyeTrackerThread(QThread):
     gaze_updated = pyqtSignal(str)
 
@@ -31,12 +55,12 @@ class EyeTrackerThread(QThread):
         self.running = True
         self.process_name = process_name
 
-        if platform.system() == "Darwin":
+        if IS_MAC:
             self.device = "mps" if torch.backends.mps.is_available() else "cpu"
         else:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.required_frames = 30  # 예: 3초 @ 10fps
+        self.required_frames = 30
         self.min_agreement = int(self.required_frames * 0.9)
         self.direction_buffer = deque(maxlen=self.required_frames)
         self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Left_Close", 4: "Right_Close", 5: "Close"}
@@ -64,7 +88,6 @@ class EyeTrackerThread(QThread):
                 masks = (res.masks.data > 0.5).cpu().numpy()
                 classes = res.boxes.cls.int().cpu().tolist()
 
-                # 초기 상태
                 iris_mask = lid_mask = None
                 has_left_iris = has_right_iris = False
                 has_left_lid = has_right_lid = False
@@ -74,37 +97,36 @@ class EyeTrackerThread(QThread):
                         has_left_iris = True
                     elif cls == 1:
                         has_right_iris = True
-                        iris_mask = mask  # right_iris
+                        iris_mask = mask
                     elif cls == 2:
                         has_left_lid = True
                     elif cls == 3:
                         has_right_lid = True
-                        lid_mask = mask   # right_eyelid                        
+                        lid_mask = mask
 
-                # 감은 눈 상태 판단
                 both_closed = not has_left_lid and not has_left_iris and not has_right_lid and not has_right_iris
                 left_closed = has_right_lid and has_right_iris and not has_left_lid and not has_left_iris
                 right_closed = has_left_lid and has_left_iris and not has_right_lid and not has_right_iris
-                
+
                 if both_closed:
-                    current_gaze = 5  # Close
+                    current_gaze = 5
                 elif left_closed:
-                    current_gaze = 3  # Left_Close
+                    current_gaze = 3
                 elif right_closed:
-                    current_gaze = 4  # Right_Close
+                    current_gaze = 4
                 elif iris_mask is not None and lid_mask is not None:
                     iris_c = self.get_center(iris_mask)
                     lid_c = self.get_center(lid_mask)
                     if iris_c and lid_c:
                         dx = iris_c[0] - lid_c[0]
                         if dx > 5:
-                            current_gaze = 0  # Right
+                            current_gaze = 0
                         elif dx < -5:
-                            current_gaze = 1  # Left
+                            current_gaze = 1
                         else:
-                            current_gaze = 2  # Center
+                            current_gaze = 2
                 else:
-                    continue  # 감지 실패
+                    continue
 
                 self.direction_buffer.append(current_gaze)
 
@@ -118,7 +140,6 @@ class EyeTrackerThread(QThread):
                         print("👁 Gaze:", self.gaze_directions[most_common])
                     self.direction_buffer.clear()
 
-
         self.cap.release()
 
     def stop(self):
@@ -126,7 +147,7 @@ class EyeTrackerThread(QThread):
         self.quit()
         self.wait()
 
-# ────────────────────────────── 오버레이 창 ──────────────────────────────
+
 class OverlayWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -134,16 +155,13 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        # 전체 창 크기 (화면 전체로 설정)
         screen_rect = QDesktopWidget().availableGeometry()
         self.setGeometry(screen_rect)
 
-        # 라벨 설정
         self.label = QLabel("Gaze: Detecting...", self)
         self.label.setFont(QFont("Arial", 36, QFont.Bold))
         self.label.setStyleSheet("color: yellow; background-color: transparent;")
 
-        # 투명도 효과
         self.opacity_effect = QGraphicsOpacityEffect(self.label)
         self.label.setGraphicsEffect(self.opacity_effect)
         self.opacity_effect.setOpacity(0.0)
@@ -151,16 +169,12 @@ class OverlayWindow(QWidget):
         self.label.adjustSize()
         self.label.hide()
 
-        # 애니메이션
         self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_anim.setDuration(1000)  # 1초 동안 fade-out
-
-        # 사라진 뒤 자동 숨김
+        self.fade_anim.setDuration(1000)
         self.fade_anim.finished.connect(self.label.hide)
 
         self.show()
-        
-        # 초록색 실행 상태 테두리 표시용 위젯
+
         self.border = QWidget(self)
         self.border.setGeometry(self.rect())
         self.border.setStyleSheet("""
@@ -168,20 +182,16 @@ class OverlayWindow(QWidget):
             border: 5px solid limegreen;
         """)
         self.border.show()
-        
-        # 오른쪽 상단 프로세스 표시 라벨
+
         self.current_process_name = "N/A"
         self.proc_label = QLabel("Process: N/A", self)
         self.proc_label.setFont(QFont("Arial", 16, QFont.Bold))
         self.proc_label.setStyleSheet("color: lightgreen; background-color: transparent;")
         self.proc_label.adjustSize()
-
-        # 위치: 오른쪽 상단 여백 포함
         screen_width = screen_rect.width()
         self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
         self.proc_label.show()
 
-        # 타이머: 1초마다 현재 프로세스 확인
         self.proc_timer = QTimer(self)
         self.proc_timer.timeout.connect(self.update_process_name)
         self.proc_timer.start(1000)
@@ -196,7 +206,6 @@ class OverlayWindow(QWidget):
         label_width = self.label.width()
         label_height = self.label.height()
 
-        # 위치 결정 로직 업데이트
         if gaze_text == "Left":
             x = int(screen_width * 0.1)
         elif gaze_text == "Right":
@@ -207,54 +216,28 @@ class OverlayWindow(QWidget):
         y = (screen_height - label_height) // 2
         self.label.move(x, y)
 
-        # 즉시 표시 및 불투명하게
         self.fade_anim.stop()
         self.opacity_effect.setOpacity(1.0)
         self.label.show()
-
-        # 1초 후 fade-out 시작
         QTimer.singleShot(1000, self.start_fade_out)
-    
+
     def update_process_name(self):
-        try:
-            hwnd = win32gui.GetForegroundWindow()
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            process_name = psutil.Process(pid).name()
-            self.current_process_name = process_name  # 여기 추가
-            self.proc_label.setText(f"Process: {process_name}")
-            self.proc_label.adjustSize()
-            screen_rect = QDesktopWidget().availableGeometry()
-            screen_width = screen_rect.width()
-            self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
-        except Exception:
-            self.current_process_name = "N/A"
-            self.proc_label.setText("Process: N/A")
-    
+        self.current_process_name = get_foreground_process_name()
+        self.proc_label.setText(f"Process: {self.current_process_name}")
+        self.proc_label.adjustSize()
+        screen_rect = QDesktopWidget().availableGeometry()
+        screen_width = screen_rect.width()
+        self.proc_label.move(screen_width - self.proc_label.width() - 20, 20)
+
     def start_fade_out(self):
         self.fade_anim.setStartValue(1.0)
         self.fade_anim.setEndValue(0.0)
         self.fade_anim.start()
 
-# ──────────────────────────────  콘솔 입력 스레드 ──────────────────────────────
-class ConsoleInputThread(threading.Thread):
-    def __init__(self, app, tracker):
-        super().__init__(daemon=True)
-        self.app = app
-        self.tracker = tracker
-
-    def run(self):
-        while True:
-            user_input = input("[입력 대기] 종료하려면 'exit' 또는 'q' 입력: ").strip().lower()
-            if user_input in ("exit", "q", "quit"):
-                print("👋 종료 요청됨. 트래커 중지 중...")
-                self.tracker.stop()
-                self.app.quit()
-                break
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
+
     config_path = resource_path("keymap/config.yaml")
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -262,7 +245,7 @@ if __name__ == "__main__":
     process_name = config.get("control")
 
     if process_name not in REGISTRY:
-        raise ValueError(f"❌ REGISTRY에 '{process_name}'에 해당하는 컨트롤러가 등록되어 있지 않습니다.\n"
+        raise ValueError(f"❌ REGISTRY가 '{process_name}'에 해당하는 컨트롤러가 등록되어 있지 않습니다.\n"
                          f"가능한 키: {list(REGISTRY.keys())}")
 
     overlay = OverlayWindow()
@@ -270,8 +253,6 @@ if __name__ == "__main__":
     tracker.gaze_updated.connect(overlay.update_gaze)
 
     tracker.start()
-    console_input_thread = ConsoleInputThread(app, tracker)
-    console_input_thread.start()
     exit_code = app.exec_()
     tracker.stop()
     sys.exit(exit_code)
