@@ -6,10 +6,11 @@ import platform
 import yaml
 from collections import deque, Counter
 import psutil
+import time
 
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QDesktopWidget, QGraphicsOpacityEffect
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QImage, QPixmap
 from ultralytics import YOLO
 
 from src import REGISTRY
@@ -23,7 +24,6 @@ if IS_WIN:
     import win32process
 elif IS_MAC:
     from AppKit import NSWorkspace
-
 
 def get_foreground_process_name():
     if IS_WIN:
@@ -42,9 +42,9 @@ def get_foreground_process_name():
     else:
         return "N/A"
 
-
 class EyeTrackerThread(QThread):
     gaze_updated = pyqtSignal(str)
+    preview_frame = pyqtSignal(np.ndarray)
 
     def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None, process_name=None):
         super().__init__()
@@ -63,7 +63,7 @@ class EyeTrackerThread(QThread):
         self.required_frames = 30
         self.min_agreement = int(self.required_frames * 0.9)
         self.direction_buffer = deque(maxlen=self.required_frames)
-        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Right_Close", 4: "Left_Close", 5: "Close"}
+        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Right_Close", 4: "Left_Close"}
         self.confirmed_gaze = None
         self.overlay = overlay
 
@@ -72,7 +72,7 @@ class EyeTrackerThread(QThread):
         if len(xs) == 0:
             return None
         return int(xs.mean()), int(ys.mean())
-    
+
     def detect_gaze(self, masks, classes):
         mask_dict = {cls: mask for mask, cls in zip(masks, classes)}
         left_iris = mask_dict.get(0)
@@ -80,35 +80,31 @@ class EyeTrackerThread(QThread):
         left_lid = mask_dict.get(2)
         right_lid = mask_dict.get(3)
 
-        # 양쪽 중 하나라도 시선 판단 가능
         left_iris_c = right_iris_c = left_lid_c = right_lid_c = None
         left_iris_mask = right_iris_mask = left_lid_mask = right_lid_mask = None
+
         if left_iris is not None and left_lid is not None:
             left_iris_mask, left_lid_mask = left_iris, left_lid
             left_iris_c = self.get_center(left_iris_mask)
             left_lid_c = self.get_center(left_lid_mask)
-        elif right_iris is not None and right_lid is not None:
+        if right_iris is not None and right_lid is not None:
             right_iris_mask, right_lid_mask = right_iris, right_lid
             right_iris_c = self.get_center(right_iris_mask)
             right_lid_c = self.get_center(right_lid_mask)
-        else:
-            return None
 
-        # 눈 감은 경우: 한 쪽만 마스크가 감지됨
         if right_lid is not None and right_iris is not None and (left_lid is None and left_iris is None):
-            return 3  # Left_Close
+            return 3  # Right_Close
         if left_lid is not None and left_iris is not None and (right_lid is None and right_iris is None):
-            return 4  # Right_Close
+            return 4  # Left_Close
 
         dx_values = []
-
         if left_iris_c is not None and left_lid_c is not None:
             dx_values.append(left_iris_c[0] - left_lid_c[0])
         if right_iris_c is not None and right_lid_c is not None:
             dx_values.append(right_iris_c[0] - right_lid_c[0])
 
         if not dx_values:
-            return None  # dx를 계산할 수 없음
+            return None
 
         dx_avg = np.mean(dx_values)
         if dx_avg > 4:
@@ -125,13 +121,13 @@ class EyeTrackerThread(QThread):
                 continue
 
             frame = cv2.flip(frame, 1)
+            self.preview_frame.emit(frame.copy())
 
             res = self.model(frame, imgsz=640, conf=0.25, iou=0.3, device=self.device, verbose=False)[0]
 
             if res.masks is not None:
                 masks = (res.masks.data > 0.5).cpu().numpy()
                 classes = res.boxes.cls.int().cpu().tolist()
-
                 current_gaze = self.detect_gaze(masks, classes)
 
                 if current_gaze is not None:
@@ -153,7 +149,6 @@ class EyeTrackerThread(QThread):
         self.running = False
         self.quit()
         self.wait()
-
 
 class OverlayWindow(QWidget):
     def __init__(self):
@@ -183,6 +178,12 @@ class OverlayWindow(QWidget):
         self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
         self.fade_anim.setDuration(1000)
         self.fade_anim.finished.connect(self.label.hide)
+
+        self.preview_label = QLabel(self)
+        self.preview_label.setFixedSize(320, 240)  # 2배로 확대
+        self.preview_label.move(self.width() - 340, self.height() - 260)  # 위치도 조정
+        self.preview_label.setStyleSheet("border: 2px solid white; background-color: black;")
+        self.preview_label.hide()
 
         self.show()
 
@@ -234,6 +235,15 @@ class OverlayWindow(QWidget):
         self.label.show()
         QTimer.singleShot(1000, self.start_fade_out)
 
+    def update_preview(self, frame):
+        h, w, ch = frame.shape
+        bytes_per_line = ch * w
+        image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888)
+        pixmap = QPixmap.fromImage(image)
+        scaled_pixmap = pixmap.scaled(320, 240, Qt.KeepAspectRatio)
+        self.preview_label.setPixmap(scaled_pixmap)
+        self.preview_label.show()
+
     def update_process_name(self):
         self.current_process_name = get_foreground_process_name()
         self.proc_label.setText(f"Process: {self.current_process_name}")
@@ -248,7 +258,6 @@ class OverlayWindow(QWidget):
         self.fade_anim.setStartValue(1.0)
         self.fade_anim.setEndValue(0.0)
         self.fade_anim.start()
-
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -266,6 +275,7 @@ if __name__ == "__main__":
     overlay = OverlayWindow()
     tracker = EyeTrackerThread(overlay=overlay, process_name=process_name)
     tracker.gaze_updated.connect(overlay.update_gaze)
+    tracker.preview_frame.connect(overlay.update_preview)
 
     tracker.start()
     exit_code = app.exec_()
