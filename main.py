@@ -63,7 +63,7 @@ class EyeTrackerThread(QThread):
         self.required_frames = 30
         self.min_agreement = int(self.required_frames * 0.9)
         self.direction_buffer = deque(maxlen=self.required_frames)
-        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Left_Close", 4: "Right_Close", 5: "Close"}
+        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Right_Close", 4: "Left_Close", 5: "Close"}
         self.confirmed_gaze = None
         self.overlay = overlay
 
@@ -73,15 +73,50 @@ class EyeTrackerThread(QThread):
             return None
         return int(xs.mean()), int(ys.mean())
     
-    def get_closed(self, iris_c, iris_mask):
-        ys, _ = np.nonzero(iris_mask)
-        if len(ys) == 0:
-            return False
-        
-        ys = set(ys)
-        if len(ys) < 3 and iris_c in ys:
-            return True
-        return False
+    def detect_gaze(self, masks, classes):
+        mask_dict = {cls: mask for mask, cls in zip(masks, classes)}
+        left_iris = mask_dict.get(0)
+        right_iris = mask_dict.get(1)
+        left_lid = mask_dict.get(2)
+        right_lid = mask_dict.get(3)
+
+        # 양쪽 중 하나라도 시선 판단 가능
+        left_iris_c = right_iris_c = left_lid_c = right_lid_c = None
+        left_iris_mask = right_iris_mask = left_lid_mask = right_lid_mask = None
+        if left_iris is not None and left_lid is not None:
+            left_iris_mask, left_lid_mask = left_iris, left_lid
+            left_iris_c = self.get_center(left_iris_mask)
+            left_lid_c = self.get_center(left_lid_mask)
+        elif right_iris is not None and right_lid is not None:
+            right_iris_mask, right_lid_mask = right_iris, right_lid
+            right_iris_c = self.get_center(right_iris_mask)
+            right_lid_c = self.get_center(right_lid_mask)
+        else:
+            return None
+
+        # 눈 감은 경우: 한 쪽만 마스크가 감지됨
+        if right_lid is not None and right_iris is not None and (left_lid is None and left_iris is None):
+            return 3  # Left_Close
+        if left_lid is not None and left_iris is not None and (right_lid is None and right_iris is None):
+            return 4  # Right_Close
+
+        dx_values = []
+
+        if left_iris_c is not None and left_lid_c is not None:
+            dx_values.append(left_iris_c[0] - left_lid_c[0])
+        if right_iris_c is not None and right_lid_c is not None:
+            dx_values.append(right_iris_c[0] - right_lid_c[0])
+
+        if not dx_values:
+            return None  # dx를 계산할 수 없음
+
+        dx_avg = np.mean(dx_values)
+        if dx_avg > 4:
+            return 0  # Right
+        elif dx_avg < -4:
+            return 1  # Left
+        else:
+            return 2  # Center
 
     def run(self):
         while self.running and self.cap.isOpened():
@@ -92,71 +127,25 @@ class EyeTrackerThread(QThread):
             frame = cv2.flip(frame, 1)
 
             res = self.model(frame, imgsz=640, conf=0.25, iou=0.3, device=self.device, verbose=False)[0]
-            iris_mask = lid_mask = None
 
             if res.masks is not None:
                 masks = (res.masks.data > 0.5).cpu().numpy()
                 classes = res.boxes.cls.int().cpu().tolist()
 
-                left_iris_mask = right_iris_mask = left_lid_mask = right_lid_mask = None
-                has_left_iris = has_right_iris = False
-                has_left_lid = has_right_lid = False
+                current_gaze = self.detect_gaze(masks, classes)
 
-                for mask, cls in zip(masks, classes):
-                    if cls == 0:
-                        has_left_iris = True
-                        left_iris_mask = mask
-                    elif cls == 1:
-                        has_right_iris = True
-                        right_iris_mask = mask
-                    elif cls == 2:
-                        has_left_lid = True
-                        left_lid_mask = mask
-                    elif cls == 3:
-                        has_right_lid = True
-                        right_lid_mask = mask
-
-                left_closed = has_right_lid and has_right_iris and not has_left_lid and not has_left_iris
-                right_closed = has_left_lid and has_left_iris and not has_right_lid and not has_right_iris
-
-                if left_closed:
-                    current_gaze = 3
-                elif right_closed:
-                    current_gaze = 4
-                elif (left_iris_mask is not None and left_lid_mask is not None) or (right_iris_mask is not None and right_lid_mask is not None):
-                    if left_iris_mask is not None and left_lid_mask is not None:
-                        iris_mask = left_iris_mask
-                        lid_mask = left_lid_mask
-                    elif right_iris_mask is not None and right_lid_mask is not None:
-                        iris_mask = right_iris_mask
-                        lid_mask = right_lid_mask
-                    iris_c = self.get_center(iris_mask)
-                    lid_c = self.get_center(lid_mask)
-                    both_closed = self.get_closed(iris_c, iris_mask)
-                    if both_closed:
-                        current_gaze = 5
-                        break
-                    if iris_c and lid_c:
-                        dx = iris_c[0] - lid_c[0]
-                        if dx > 5:
-                            current_gaze = 0
-                        elif dx < -5:
-                            current_gaze = 1
-                        else:
-                            current_gaze = 2
-                else:
-                    continue
-
-                self.direction_buffer.append(current_gaze)
-                if len(self.direction_buffer) == self.required_frames:
-                    counts = Counter(self.direction_buffer)
-                    most_common, count = counts.most_common(1)[0]
-                    if count >= self.min_agreement and most_common != self.confirmed_gaze:
-                        REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
-                        self.confirmed_gaze = most_common
-                        self.gaze_updated.emit(self.gaze_directions[most_common])
-                        print("👁 Gaze:", self.gaze_directions[most_common])
-                    self.direction_buffer.clear()
+                if current_gaze is not None:
+                    self.direction_buffer.append(current_gaze)
+                    print("==========Gaze detected:", self.gaze_directions[current_gaze], "==========")
+                    if len(self.direction_buffer) == self.required_frames:
+                        counts = Counter(self.direction_buffer)
+                        most_common, count = counts.most_common(1)[0]
+                        if count >= self.min_agreement and most_common != self.confirmed_gaze:
+                            REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
+                            self.confirmed_gaze = most_common
+                            self.gaze_updated.emit(self.gaze_directions[most_common])
+                            print("👁 Gaze:", self.gaze_directions[most_common])
+                        self.direction_buffer.clear()
 
         self.cap.release()
 

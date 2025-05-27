@@ -30,7 +30,11 @@ def _send_key(key: str, repeat: int = 1):
         if IS_WIN:
             keyboard.send(key)
         elif IS_MAC:
-            pyautogui.press(key)
+            if "+" in key:
+                keys = key.split("+")
+                pyautogui.hotkey(*keys)
+            else:
+                pyautogui.press(key)
 
 
 def control_pdf(gaze_state: int, process_name: str):
@@ -42,14 +46,18 @@ def control_pdf(gaze_state: int, process_name: str):
         return
 
     action_list = _gaze_actions.get(gaze_state)
+    if action_list is None:
+        return
     if gaze_state == _last_command:
         return
 
     _last_command = gaze_state
 
     mode_idx = 0 if pdf_mode == "fit_page" else 1
+
     if gaze_state == 5:
-        pdf_mode = "fit_width"
+        pdf_mode = "fit_width" if pdf_mode == "fit_page" else "fit_page"
+
     if action_list[mode_idx] is None:
         return
 
