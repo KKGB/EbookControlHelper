@@ -181,4 +181,4 @@ backup
 *.out
 *.pt
 pretrain
-ultralytics
+#ultralytics
