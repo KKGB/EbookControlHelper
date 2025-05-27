@@ -1,7 +1,6 @@
 "control": "pdf"
-0: [["pagedown", 1], ["down", 5]]       # Right
-1: [["pageup", 1], ["up", 5]]           # Left
+0: [["pagedown", 1], ["down", 2]]       # Right
+1: [["pageup", 1], ["up", 2]]           # Left
 2: null                                 # Center (초기화)
-3: [["ctrl+alt+g", 1], ["ctrl+c", 1]]   # Left_Close
-4: [["ctrl+alt+g", 1], ["ctrl+v", 1], ["enter", 1]]   # Right_Close
-5: [["ctrl+\\", 1]]                     # Close
+3: [["ctrl+\\", 1], ["ctrl+\\", 1]]     # Left_Close
+4: [["ctrl+\\", 1], ["ctrl+\\", 1]]     # Right_Close

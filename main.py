@@ -6,7 +6,6 @@ import platform
 import yaml
 from collections import deque, Counter
 import psutil
-import time
 
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget, QDesktopWidget, QGraphicsOpacityEffect
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QPropertyAnimation
@@ -24,6 +23,13 @@ if IS_WIN:
     import win32process
 elif IS_MAC:
     from AppKit import NSWorkspace
+
+COLORS = [
+    (255,  64,  64),  # right_iris
+    ( 64,  64, 255),  # left_iris
+    (255, 192,   0),  # right_eyelid
+    (  0, 255, 128),  # left_eyelid
+]
 
 def get_foreground_process_name():
     if IS_WIN:
@@ -60,10 +66,10 @@ class EyeTrackerThread(QThread):
         else:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.required_frames = 30
-        self.min_agreement = int(self.required_frames * 0.9)
+        self.required_frames = 10
+        self.min_agreement = int(self.required_frames * 0.8)
         self.direction_buffer = deque(maxlen=self.required_frames)
-        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Right_Close", 4: "Left_Close"}
+        self.gaze_directions = {0: "Right", 1: "Left", 2: "Center", 3: "Left_Close", 4: "Right_Close"}
         self.confirmed_gaze = None
         self.overlay = overlay
 
@@ -119,10 +125,10 @@ class EyeTrackerThread(QThread):
             ret, frame = self.cap.read()
             if not ret:
                 continue
-
+            
             frame = cv2.flip(frame, 1)
-            self.preview_frame.emit(frame.copy())
-
+            h, w = frame.shape[:2]
+            
             res = self.model(frame, imgsz=640, conf=0.25, iou=0.3, device=self.device, verbose=False)[0]
 
             if res.masks is not None:
@@ -132,17 +138,27 @@ class EyeTrackerThread(QThread):
 
                 if current_gaze is not None:
                     self.direction_buffer.append(current_gaze)
-                    print("==========Gaze detected:", self.gaze_directions[current_gaze], "==========")
                     if len(self.direction_buffer) == self.required_frames:
                         counts = Counter(self.direction_buffer)
                         most_common, count = counts.most_common(1)[0]
                         if count >= self.min_agreement and most_common != self.confirmed_gaze:
-                            REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
+                            title = REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
                             self.confirmed_gaze = most_common
-                            self.gaze_updated.emit(self.gaze_directions[most_common])
+                            self.gaze_updated.emit(title)
                             print("👁 Gaze:", self.gaze_directions[most_common])
                         self.direction_buffer.clear()
+                
+                overlay = frame.copy()
+                for mask, cls in zip(masks, classes):
+                    col = COLORS[cls % len(COLORS)]
+                    mask = cv2.resize(mask.astype(np.uint8), (w, h),
+                                    interpolation=cv2.INTER_NEAREST)
+                    for c in range(3):
+                        overlay[:,:,c] = np.where(mask,
+                            0.4*col[c] + 0.6*overlay[:,:,c], overlay[:,:,c])
+                frame = overlay
 
+            self.preview_frame.emit(frame)
         self.cap.release()
 
     def stop(self):
@@ -166,7 +182,7 @@ class OverlayWindow(QWidget):
 
         self.label = QLabel("Gaze: Detecting...", self)
         self.label.setFont(QFont("Arial", 36, QFont.Bold))
-        self.label.setStyleSheet("color: yellow; background-color: transparent;")
+        self.label.setStyleSheet("color: red; background-color: transparent;")
 
         self.opacity_effect = QGraphicsOpacityEffect(self.label)
         self.label.setGraphicsEffect(self.opacity_effect)
@@ -211,7 +227,7 @@ class OverlayWindow(QWidget):
         self.proc_timer.start(1000)
 
     def update_gaze(self, gaze_text):
-        self.label.setText(f"Gaze: {gaze_text}")
+        self.label.setText(gaze_text)
         self.label.adjustSize()
 
         screen_rect = QDesktopWidget().availableGeometry()
@@ -220,9 +236,9 @@ class OverlayWindow(QWidget):
         label_width = self.label.width()
         label_height = self.label.height()
 
-        if gaze_text == "Left":
+        if gaze_text == "SCROLL UP":
             x = int(screen_width * 0.1)
-        elif gaze_text == "Right":
+        elif gaze_text == "SCROLL DOWN":
             x = int(screen_width * 0.9 - label_width)
         else:
             x = (screen_width - label_width) // 2
