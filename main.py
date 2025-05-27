@@ -72,6 +72,16 @@ class EyeTrackerThread(QThread):
         if len(xs) == 0:
             return None
         return int(xs.mean()), int(ys.mean())
+    
+    def get_closed(self, iris_c, iris_mask):
+        ys, _ = np.nonzero(iris_mask)
+        if len(ys) == 0:
+            return False
+        
+        ys = set(ys)
+        if len(ys) < 3 and iris_c in ys:
+            return True
+        return False
 
     def run(self):
         while self.running and self.cap.isOpened():
@@ -88,35 +98,44 @@ class EyeTrackerThread(QThread):
                 masks = (res.masks.data > 0.5).cpu().numpy()
                 classes = res.boxes.cls.int().cpu().tolist()
 
-                iris_mask = lid_mask = None
+                left_iris_mask = right_iris_mask = left_lid_mask = right_lid_mask = None
                 has_left_iris = has_right_iris = False
                 has_left_lid = has_right_lid = False
 
                 for mask, cls in zip(masks, classes):
                     if cls == 0:
                         has_left_iris = True
+                        left_iris_mask = mask
                     elif cls == 1:
                         has_right_iris = True
-                        iris_mask = mask
+                        right_iris_mask = mask
                     elif cls == 2:
                         has_left_lid = True
+                        left_lid_mask = mask
                     elif cls == 3:
                         has_right_lid = True
-                        lid_mask = mask
+                        right_lid_mask = mask
 
-                both_closed = not has_left_lid and not has_left_iris and not has_right_lid and not has_right_iris
                 left_closed = has_right_lid and has_right_iris and not has_left_lid and not has_left_iris
                 right_closed = has_left_lid and has_left_iris and not has_right_lid and not has_right_iris
 
-                if both_closed:
-                    current_gaze = 5
-                elif left_closed:
+                if left_closed:
                     current_gaze = 3
                 elif right_closed:
                     current_gaze = 4
-                elif iris_mask is not None and lid_mask is not None:
+                elif (left_iris_mask is not None and left_lid_mask is not None) or (right_iris_mask is not None and right_lid_mask is not None):
+                    if left_iris_mask is not None and left_lid_mask is not None:
+                        iris_mask = left_iris_mask
+                        lid_mask = left_lid_mask
+                    elif right_iris_mask is not None and right_lid_mask is not None:
+                        iris_mask = right_iris_mask
+                        lid_mask = right_lid_mask
                     iris_c = self.get_center(iris_mask)
                     lid_c = self.get_center(lid_mask)
+                    both_closed = self.get_closed(iris_c, iris_mask)
+                    if both_closed:
+                        current_gaze = 5
+                        break
                     if iris_c and lid_c:
                         dx = iris_c[0] - lid_c[0]
                         if dx > 5:
@@ -129,7 +148,6 @@ class EyeTrackerThread(QThread):
                     continue
 
                 self.direction_buffer.append(current_gaze)
-
                 if len(self.direction_buffer) == self.required_frames:
                     counts = Counter(self.direction_buffer)
                     most_common, count = counts.most_common(1)[0]
