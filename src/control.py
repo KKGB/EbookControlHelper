@@ -51,39 +51,59 @@ def control_pdf(gaze_state: int, process_name: str):
     global _last_command, pdf_mode
 
     if IS_WIN and process_name.lower() != "msedge.exe":
-        return
+        if pdf_mode == "fit_page":
+            return None, "PAGE MODE"
+        else:
+            return None, "SCROLL MODE"
     if IS_MAC and process_name.lower() != "microsoft edge":
-        return
+        if pdf_mode == "fit_page":
+            return None, "PAGE MODE"
+        else:
+            return None, "SCROLL MODE"
     if gaze_state == _last_command:
-        return
+        if pdf_mode == "fit_page":
+            return None, "PAGE MODE"
+        else:
+            return None, "SCROLL MODE"
 
     _last_command = gaze_state
     action_list = _gaze_actions.get(gaze_state)
 
-    mode_idx = 0 if pdf_mode == "fit_page" else 1
-
     if gaze_state == 0 or gaze_state == 1 or gaze_state == 3 or gaze_state == 4:
-        if gaze_state == 3 or gaze_state == 4:
+        if gaze_state == 3:
             pdf_mode = "fit_page" if pdf_mode == "fit_width" else "fit_width"
         if gaze_state == 0 or gaze_state == 1 or gaze_state == 4:
+            mode_idx = 0 if pdf_mode == "fit_page" else 1
             key_cmd, repeat = action_list[mode_idx]
-        _send_key(key_cmd, repeat)
+            _send_key(key_cmd, repeat)
     elif gaze_state == 2:
         focus_app_by_name(process_name)
     
     if gaze_state == 0:
-        return "SCROLL DOWN"
+        if pdf_mode == "fit_page":
+            return "PAGE DOWN", "PAGE MODE"
+        else:
+            return "SCROLL DOWN", "SCROLL MODE"
     elif gaze_state == 1:
-        return "SCROLL UP"
+        if pdf_mode == "fit_page":
+            return "PAGE UP", "PAGE MODE"
+        else:
+            return "SCROLL UP", "SCROLL MODE"
     elif gaze_state == 2:
-        return "INIT"
+        if pdf_mode == "fit_page":
+            return "CENTER", "PAGE MODE"
+        else:
+            return "CENTER", "SCROLL MODE"
     elif gaze_state == 3:
-        return "CALIBRATION"
+        if pdf_mode == "fit_page":
+            return "PAGE MODE", "PAGE MODE"
+        else:
+            return "SCROLL MODE", "SCROLL MODE"
     elif gaze_state == 4:
         if pdf_mode == "fit_page":
-            return "FIT PAGE"
+            return "", "PAGE MODE"
         else:
-            return "FIT WIDTH"
+            return "", "SCROLL MODE"
 
 
 def control_youtube(gaze_state: int, process_name: str):

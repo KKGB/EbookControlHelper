@@ -51,6 +51,7 @@ def get_foreground_process_name():
 class EyeTrackerThread(QThread):
     gaze_updated = pyqtSignal(str)
     preview_frame = pyqtSignal(np.ndarray)
+    pdf_mode = pyqtSignal(str)
 
     def __init__(self, model_path="models/best.pt", cam_id=0, overlay=None, process_name=None):
         super().__init__()
@@ -142,8 +143,9 @@ class EyeTrackerThread(QThread):
                         counts = Counter(self.direction_buffer)
                         most_common, count = counts.most_common(1)[0]
                         if count >= self.min_agreement and most_common != self.confirmed_gaze:
-                            title = REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
+                            title, pdf_mode = REGISTRY[self.process_name](most_common, self.overlay.current_process_name)
                             self.confirmed_gaze = most_common
+                            self.pdf_mode.emit(pdf_mode)
                             self.gaze_updated.emit(title)
                             print("👁 Gaze:", self.gaze_directions[most_common])
                         self.direction_buffer.clear()
@@ -225,6 +227,16 @@ class OverlayWindow(QWidget):
         self.proc_timer = QTimer(self)
         self.proc_timer.timeout.connect(self.update_process_name)
         self.proc_timer.start(1000)
+        
+        self.mode_label = QLabel("", self)
+        self.mode_label.setFont(QFont("Arial", 20, QFont.Bold))
+        self.mode_label.setStyleSheet("color: lightgreen; background-color: transparent;")
+        self.mode_label.adjustSize()
+
+        mode_label_margin = 20
+        self.mode_label.move(screen_rect.width() - self.mode_label.width() - mode_label_margin,
+                            screen_rect.height() - self.mode_label.height() - mode_label_margin)
+        self.mode_label.show()
 
     def update_gaze(self, gaze_text):
         self.label.setText(gaze_text)
@@ -260,6 +272,15 @@ class OverlayWindow(QWidget):
         self.preview_label.setPixmap(scaled_pixmap)
         self.preview_label.show()
 
+    def update_pdf_mode(self, pdf_mode):
+        self.mode_label.setText(f"{pdf_mode}")
+        self.mode_label.adjustSize()
+
+        screen_rect = QApplication.primaryScreen().geometry()
+        margin = 20
+        self.mode_label.move(screen_rect.width() - self.mode_label.width() - margin,
+                            screen_rect.height() - self.mode_label.height() - margin)
+
     def update_process_name(self):
         self.current_process_name = get_foreground_process_name()
         self.proc_label.setText(f"Process: {self.current_process_name}")
@@ -292,6 +313,7 @@ if __name__ == "__main__":
     tracker = EyeTrackerThread(overlay=overlay, process_name=process_name)
     tracker.gaze_updated.connect(overlay.update_gaze)
     tracker.preview_frame.connect(overlay.update_preview)
+    tracker.pdf_mode.connect(overlay.update_pdf_mode)
 
     tracker.start()
     exit_code = app.exec_()
