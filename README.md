@@ -27,4 +27,4 @@ The dataset was downloaded for research purposes only and is used in accordance 
 
 ## Program
 - [Window Download]()
-- [Mac Download](https://drive.google.com/file/d/14qq6KWHLhXqpy1bQVQo3ywG40MiCcVch/view?usp=drive_link)
+- [~~Mac Download~~]()
