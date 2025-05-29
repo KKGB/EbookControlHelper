@@ -15,9 +15,16 @@ conda env create -f environment_window.yml
 # mac
 conda env create -f environment_mac.yml
 ```
+## Data
+We use a publicly available dataset from [AI Hub](https://www.aihub.or.kr/aihubdata/data/view.do?currMenu=115&topMenu=100&aihubDataSe=data&dataSetSn=548), provided by the Korean government’s AI Hub project.  
+The dataset was downloaded for research purposes only and is used in accordance with the terms and conditions specified by AI Hub.
 
 ## Model
 | Name | Parameters | Link |
 |-----------|--------------|-----------|
 | YOLOv11s  | 10,083,836        | [Download](https://drive.google.com/file/d/1eqGQkjUDku4U0In6x5GGQciVW7Dm1yHZ/view?usp=sharing) |
 | YOLOv11n  | 2,843,388        | [Download](https://drive.google.com/file/d/1kFgXxgROzXhJwsZg7eyFz_wn69kgXu3v/view?usp=sharing) |
+
+## Program
+- [Window Download]()
+- [Mac Download](https://drive.google.com/file/d/14qq6KWHLhXqpy1bQVQo3ywG40MiCcVch/view?usp=drive_link)
