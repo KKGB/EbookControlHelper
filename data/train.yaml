@@ -1,0 +1,9 @@
+path: data
+train: images/train
+val:   images/val
+# Classes
+names:
+  0: right_iris
+  1: left_iris
+  2: right_eyelid
+  3: left_eyelid
